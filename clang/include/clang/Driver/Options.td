@@ -1094,6 +1094,9 @@ defm autolink : BoolFOption<"autolink",
 // C++ Coroutines TS
 defm coroutines_ts : OptInFFlag<"coroutines-ts", "Enable support for the C++ Coroutines TS">;
 
+// C++ UFCS proposal
+defm ufcs : OptInFFlag<"ufcs", "Enable unified function call syntax">;
+
 def fembed_bitcode_EQ : Joined<["-"], "fembed-bitcode=">,
     Group<f_Group>, Flags<[NoXarchOption, CC1Option, CC1AsOption]>, MetaVarName<"<option>">,
     HelpText<"Embed LLVM bitcode (option: off, all, bitcode, marker)">,

@@ -481,9 +481,9 @@ public:
   }
 
   using using_directives_range =
-      llvm::iterator_range<UsingDirectivesTy::iterator>;
+      llvm::iterator_range<UsingDirectivesTy::const_iterator>;
 
-  using_directives_range using_directives() {
+  using_directives_range using_directives() const {
     return using_directives_range(UsingDirectives.begin(),
                                   UsingDirectives.end());
   }

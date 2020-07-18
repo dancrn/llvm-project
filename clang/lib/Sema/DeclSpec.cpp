@@ -167,23 +167,21 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
                                              bool RefQualifierIsLvalueRef,
                                              SourceLocation RefQualifierLoc,
                                              SourceLocation MutableLoc,
-                                             ExceptionSpecificationType
-                                                 ESpecType,
+                                             ExceptionSpecificationType ESpecType,
                                              SourceRange ESpecRange,
                                              ParsedType *Exceptions,
                                              SourceRange *ExceptionRanges,
                                              unsigned NumExceptions,
                                              Expr *NoexceptExpr,
                                              CachedTokens *ExceptionSpecTokens,
-                                             ArrayRef<NamedDecl*>
-                                                 DeclsInPrototype,
+                                             ArrayRef<NamedDecl*> DeclsInPrototype,
                                              SourceLocation LocalRangeBegin,
                                              SourceLocation LocalRangeEnd,
                                              Declarator &TheDeclarator,
                                              TypeResult TrailingReturnType,
-                                             SourceLocation
-                                                 TrailingReturnTypeLoc,
-                                             DeclSpec *MethodQualifiers) {
+                                             SourceLocation TrailingReturnTypeLoc,
+                                             DeclSpec *MethodQualifiers,
+                                             bool IsUFCSCand) {
   assert(!(MethodQualifiers && MethodQualifiers->getTypeQualifiers() & DeclSpec::TQ_atomic) &&
          "function cannot have _Atomic qualifier");
 
@@ -216,6 +214,7 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
   I.Fun.TrailingReturnTypeLoc   = TrailingReturnTypeLoc;
   I.Fun.MethodQualifiers        = nullptr;
   I.Fun.QualAttrFactory         = nullptr;
+  I.Fun.IsUFCSCandidate         = IsUFCSCand;
 
   if (MethodQualifiers && (MethodQualifiers->getTypeQualifiers() ||
                            MethodQualifiers->getAttributes().size())) {

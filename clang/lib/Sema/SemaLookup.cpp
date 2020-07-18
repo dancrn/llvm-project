@@ -100,7 +100,7 @@ namespace {
   public:
     UnqualUsingDirectiveSet(Sema &SemaRef) : SemaRef(SemaRef) {}
 
-    void visitScopeChain(Scope *S, Scope *InnermostFileScope) {
+    void visitScopeChain(const Scope *S, const Scope *InnermostFileScope) {
       // C++ [namespace.udir]p1:
       //   During unqualified name lookup, the names appear as if they
       //   were declared in the nearest enclosing namespace which contains
@@ -1051,10 +1051,32 @@ static bool LookupDirect(Sema &S, LookupResult &R, const DeclContext *DC) {
     DeclareImplicitMemberFunctionsWithName(S, R.getLookupName(), R.getNameLoc(),
                                            DC);
 
+
   // Perform lookup into this declaration context.
+  auto LookupKind = R.getLookupKind();
   DeclContext::lookup_result DR = DC->lookup(R.getLookupName());
   for (NamedDecl *D : DR) {
     if ((D = R.getAcceptableDecl(D))) {
+      if (DC->isFileContext() && (LookupKind == Sema::LookupMemberName)) {
+        if (auto *FuncDecl = dyn_cast<FunctionDecl>(D)) {
+          // We can get here if in a UFCS candidate lookup - when looking up
+          // member names we should only include functions that are marked as
+          // potential UFCS candidates.
+          if (!FuncDecl->isUFCSCandidate())
+            continue;
+        } else if (auto *TemplateDecl = dyn_cast<FunctionTemplateDecl>(D)) {
+          // FunctionTemplateDecls are what are constructed regardless of
+          // whether they are defined in a class context or a normal context.
+          // So, if the decl context that contains it is a class decl context,
+          // then we must include it as a lookup result. Otherwise, we include
+          // it only if it is a UFCS candidate.
+          if (!TemplateDecl->getTemplatedDecl()->isUFCSCandidate())
+            continue;
+        } else {
+          continue;
+        }
+      }
+
       R.addDecl(D);
       Found = true;
     }
@@ -1164,7 +1186,7 @@ CppNamespaceLookup(Sema &S, LookupResult &R, ASTContext &Context,
   return Found;
 }
 
-static bool isNamespaceOrTranslationUnitScope(Scope *S) {
+static bool isNamespaceOrTranslationUnitScope(const Scope *S) {
   if (DeclContext *Ctx = S->getEntity())
     return Ctx->isFileContext();
   return false;
@@ -1173,9 +1195,9 @@ static bool isNamespaceOrTranslationUnitScope(Scope *S) {
 /// Find the outer declaration context from this scope. This indicates the
 /// context that we should search up to (exclusive) before considering the
 /// parent of the specified scope.
-static DeclContext *findOuterContext(Scope *S) {
-  for (Scope *OuterS = S->getParent(); OuterS; OuterS = OuterS->getParent())
-    if (DeclContext *DC = OuterS->getLookupEntity())
+static DeclContext *findOuterContext(const Scope *S) {
+  for (const Scope *Outer = S->getParent(); Outer; Outer = Outer->getParent())
+    if (DeclContext *DC = Outer->getLookupEntity())
       return DC;
   return nullptr;
 }
@@ -1201,7 +1223,7 @@ struct FindLocalExternScope {
 };
 } // end anonymous namespace
 
-bool Sema::CppLookupName(LookupResult &R, Scope *S) {
+bool Sema::CppLookupName(LookupResult &R, const Scope *S) {
   assert(getLangOpts().CPlusPlus && "Can perform only C++ lookup");
 
   DeclarationName Name = R.getLookupName();
@@ -1210,7 +1232,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
   // If this is the name of an implicitly-declared special member function,
   // go through the scope stack to implicitly declare
   if (isImplicitlyDeclaredMemberFunctionName(Name)) {
-    for (Scope *PreS = S; PreS; PreS = PreS->getParent())
+    for (const Scope *PreS = S; PreS; PreS = PreS->getParent())
       if (DeclContext *DC = PreS->getEntity())
         DeclareImplicitMemberFunctionsWithName(*this, Name, R.getNameLoc(), DC);
   }
@@ -1218,7 +1240,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
   // Implicitly declare member functions with the name we're looking for, if in
   // fact we are in a scope where it matters.
 
-  Scope *Initial = S;
+  const Scope *Initial = S;
   IdentifierResolver::iterator
     I = IdResolver.begin(Name),
     IEnd = IdResolver.end();
@@ -1269,6 +1291,9 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
             R.setShadowed();
             continue;
           }
+        } else if (NameKind == LookupMemberName && isa<FunctionDecl>(ND)) {
+          if (!cast<FunctionDecl>(ND)->isUFCSCandidate())
+            continue;
         } else {
           // We found something in this scope, we should not look at the
           // namespace scope
@@ -1344,7 +1369,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
 
             // Find the innermost file scope, so we can add using directives
             // from local scopes.
-            Scope *InnermostFileScope = S;
+            const Scope *InnermostFileScope = S;
             while (InnermostFileScope &&
                    !isNamespaceOrTranslationUnitScope(InnermostFileScope))
               InnermostFileScope = InnermostFileScope->getParent();
@@ -1369,7 +1394,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
         // example, inside a class without any base classes, we never need to
         // perform qualified lookup because all of the members are on top of the
         // identifier chain.
-        if (LookupQualifiedName(R, Ctx, /*InUnqualifiedLookup=*/true))
+        if (LookupQualifiedName(R, Ctx, nullptr, /*InUnqualifiedLookup=*/true))
           return true;
       }
     }
@@ -1379,9 +1404,16 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
   // FIXME:  This really, really shouldn't be happening.
   if (!S) return false;
 
-  // If we are looking for members, no need to look into global/namespace scope.
-  if (NameKind == LookupMemberName)
-    return false;
+  // If we are looking for members for the purpose of redeclaration, then
+  // there's no need to look into global/namespace scope. Otherwise, if not a
+  // redecl context (and we have UFCS enabled), we continue to search for a UFCS
+  // candidate function.
+  if(getLangOpts().UnifiedFunctionCallSyntax) {
+    if (NameKind == LookupMemberName && R.isForRedeclaration())
+      return false;
+  } else if (NameKind == LookupMemberName) {
+      return false;
+  }
 
   // Collect UsingDirectiveDecls in all scopes, and recursively all
   // nominated namespaces by those using-directives.
@@ -1403,16 +1435,20 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
   // that aren't strictly lexical, and therefore we walk through the
   // context as well as walking through the scopes.
   for (; S; S = S->getParent()) {
-    // Check whether the IdResolver has anything in this scope.
     bool Found = false;
-    for (; I != IEnd && S->isDeclScope(*I); ++I) {
-      if (NamedDecl *ND = R.getAcceptableDecl(*I)) {
-        // We found something.  Look for anything else in our scope
-        // with this same name and in an acceptable identifier
-        // namespace, so that we can construct an overload set if we
-        // need to.
-        Found = true;
-        R.addDecl(ND);
+    // Check whether the IdResolver has anything in this scope, unless we're
+    // looking for a member, in which case, we'll leave that to be done during
+    // namespace lookup.
+    if (NameKind != LookupMemberName || R.isForRedeclaration()) {
+      for (; I != IEnd && S->isDeclScope(*I); ++I) {
+        if (NamedDecl *ND = R.getAcceptableDecl(*I)) {
+          // We found something.  Look for anything else in our scope
+          // with this same name and in an acceptable identifier
+          // namespace, so that we can construct an overload set if we
+          // need to.
+          Found = true;
+          R.addDecl(ND);
+        }
       }
     }
 
@@ -1869,7 +1905,8 @@ NamedDecl *LookupResult::getAcceptableDeclSlow(NamedDecl *D) const {
 /// used to diagnose ambiguities.
 ///
 /// @returns \c true if lookup succeeded and false otherwise.
-bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
+bool Sema::LookupName(LookupResult &R, const Scope *S,
+                      bool AllowBuiltinCreation) {
   DeclarationName Name = R.getLookupName();
   if (!Name) return false;
 
@@ -1976,7 +2013,12 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
   // may be able to handle the situation.
   // Note: some lookup failures are expected!
   // See e.g. R.isForRedeclaration().
-  return (ExternalSource && ExternalSource->LookupUnqualified(R, S));
+  // casting away S's const-ness seems unavoidable right now: changing the
+  // interface of external source seems undesirable, and all the entry points
+  // for UFCS (the motivation for this change) deal with Scope as a constant
+  // value.
+  return (ExternalSource &&
+          ExternalSource->LookupUnqualified(R, const_cast<Scope *>(S)));
 }
 
 /// Perform qualified name lookup in the namespaces nominated by
@@ -2108,6 +2150,7 @@ static bool LookupQualifiedNameInUsingDirectives(Sema &S, LookupResult &R,
 ///
 /// \returns true if lookup succeeded, false if it failed.
 bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
+                               const Scope *UFCSScope,
                                bool InUnqualifiedLookup) {
   assert(LookupCtx && "Sema::LookupQualifiedName requires a lookup context");
 
@@ -2133,7 +2176,11 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
     }
   } QL(LookupCtx);
 
-  if (LookupDirect(*this, R, LookupCtx)) {
+  bool Found = LookupDirect(*this, R, LookupCtx);
+  if (getLangOpts().UnifiedFunctionCallSyntax && UFCSScope)
+    Found |= LookupName(R, UFCSScope, false);
+
+  if (Found) {
     R.resolveKind();
     if (isa<CXXRecordDecl>(LookupCtx))
       R.setNamingClass(cast<CXXRecordDecl>(LookupCtx));
@@ -2375,13 +2422,12 @@ bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
 ///
 /// \returns true if lookup succeeded, false if it failed.
 bool Sema::LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
-                               CXXScopeSpec &SS) {
+                               const Scope *UFCSScope, CXXScopeSpec &SS) {
   auto *NNS = SS.getScopeRep();
   if (NNS && NNS->getKind() == NestedNameSpecifier::Super)
     return LookupInSuper(R, NNS->getAsRecordDecl());
   else
-
-    return LookupQualifiedName(R, LookupCtx);
+    return LookupQualifiedName(R, LookupCtx, UFCSScope);
 }
 
 /// Performs name lookup for a name that was parsed in the
