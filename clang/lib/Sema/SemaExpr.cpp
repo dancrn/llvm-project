@@ -2567,7 +2567,7 @@ ExprResult Sema::BuildQualifiedDeclarationNameExpr(
     return ExprError();
 
   LookupResult R(*this, NameInfo, LookupOrdinaryName);
-  LookupQualifiedName(R, DC);
+  LookupQualifiedName(R, DC, S);
 
   if (R.isAmbiguous())
     return ExprError();

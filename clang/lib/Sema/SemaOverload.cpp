@@ -6224,6 +6224,9 @@ void Sema::AddOverloadCandidate(
   Candidate.IgnoreObjectArgument = false;
   Candidate.ExplicitCallArguments = Args.size();
 
+  if (Function->isUFCSCandidate())
+    Candidate.UFCSArgument = Args[0];
+
   // Explicit functions are not actually candidates at all if we're not
   // allowing them in this context, but keep them around so we can point
   // to them in diagnostics.
@@ -7592,7 +7595,7 @@ void Sema::AddMemberOperatorCandidates(OverloadedOperatorKind Op,
       return;
 
     LookupResult Operators(*this, OpName, OpLoc, LookupOrdinaryName);
-    LookupQualifiedName(Operators, T1Rec->getDecl());
+    LookupQualifiedName(Operators, T1Rec->getDecl(), nullptr);
     Operators.suppressDiagnostics();
 
     for (LookupResult::iterator Oper = Operators.begin(),
@@ -11418,20 +11421,26 @@ CompleteNonViableCandidate(Sema &S, OverloadCandidate *Cand,
   for (unsigned ParamIdx = Reversed ? ParamTypes.size() - 1 : 0;
        ConvIdx != ConvCount;
        ++ConvIdx, ++ArgIdx, ParamIdx += (Reversed ? -1 : 1)) {
-    assert(ArgIdx < Args.size() && "no argument for this arg conversion");
+    Expr *Arg;
+    if (Cand->Function->isUFCSCandidate() && Cand->UFCSArgument) {
+      assert(ArgIdx <= Args.size() && "no argument for this arg conversion");
+      Arg = ArgIdx == 0 ? Cand->UFCSArgument : Args[ArgIdx - 1];
+    } else {
+      assert(ArgIdx < Args.size() && "no argument for this arg conversion");
+      Arg = Args[ArgIdx];
+    }
+
     if (Cand->Conversions[ConvIdx].isInitialized()) {
       // We've already checked this conversion.
     } else if (ParamIdx < ParamTypes.size()) {
       if (ParamTypes[ParamIdx]->isDependentType())
-        Cand->Conversions[ConvIdx].setAsIdentityConversion(
-            Args[ArgIdx]->getType());
+        Cand->Conversions[ConvIdx].setAsIdentityConversion(Arg->getType());
       else {
-        Cand->Conversions[ConvIdx] =
-            TryCopyInitialization(S, Args[ArgIdx], ParamTypes[ParamIdx],
-                                  SuppressUserConversions,
-                                  /*InOverloadResolution=*/true,
-                                  /*AllowObjCWritebackConversion=*/
-                                  S.getLangOpts().ObjCAutoRefCount);
+        Cand->Conversions[ConvIdx] = TryCopyInitialization(
+            S, Arg, ParamTypes[ParamIdx], SuppressUserConversions,
+            /*InOverloadResolution=*/true,
+            /*AllowObjCWritebackConversion=*/
+            S.getLangOpts().ObjCAutoRefCount);
         // Store the FixIt in the candidate if it exists.
         if (!Unfixable && Cand->Conversions[ConvIdx].isBad())
           Unfixable = !Cand->TryToFixBadConversion(ConvIdx, S);
@@ -12547,7 +12556,7 @@ DiagnoseTwoPhaseLookup(Sema &SemaRef, SourceLocation FnLoc,
     if (DC->isTransparentContext())
       continue;
 
-    SemaRef.LookupQualifiedName(R, DC);
+    SemaRef.LookupQualifiedName(R, DC, nullptr);
 
     if (!R.empty()) {
       R.suppressDiagnostics();
@@ -14005,18 +14014,32 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
     return ExprError();
 
   MemberExpr *MemExpr;
-  CXXMethodDecl *Method = nullptr;
+  FunctionDecl *FuncDecl = nullptr;
   DeclAccessPair FoundDecl = DeclAccessPair::make(nullptr, AS_public);
   NestedNameSpecifier *Qualifier = nullptr;
+  SmallVector<Expr *, 12> ArgsWithMember;
+
   if (isa<MemberExpr>(NakedMemExpr)) {
     MemExpr = cast<MemberExpr>(NakedMemExpr);
-    Method = cast<CXXMethodDecl>(MemExpr->getMemberDecl());
+    FuncDecl = cast<FunctionDecl>(MemExpr->getMemberDecl());
     FoundDecl = MemExpr->getFoundDecl();
     Qualifier = MemExpr->getQualifier();
     UnbridgedCasts.restore();
+    if (!MemExpr->isImplicitAccess())
+      ArgsWithMember.push_back(MemExpr->getBase());
+    for (auto arg : Args)
+      ArgsWithMember.push_back(arg);
   } else {
     UnresolvedMemberExpr *UnresExpr = cast<UnresolvedMemberExpr>(NakedMemExpr);
     Qualifier = UnresExpr->getQualifier();
+
+    // we can only include a member for UFCS if it is of the form x->f or x.f
+    // (i.e., a non-implicit access).
+    if (!UnresExpr->isImplicitAccess())
+      ArgsWithMember.push_back(UnresExpr->getBase());
+
+    for (auto arg : Args)
+      ArgsWithMember.push_back(arg);
 
     QualType ObjectType = UnresExpr->getBaseType();
     Expr::Classification ObjectClassification
@@ -14038,7 +14061,7 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
            E = UnresExpr->decls_end(); I != E; ++I) {
 
       NamedDecl *Func = *I;
-      CXXRecordDecl *ActingDC = cast<CXXRecordDecl>(Func->getDeclContext());
+      CXXRecordDecl *ActingDC = dyn_cast<CXXRecordDecl>(Func->getDeclContext());
       if (isa<UsingShadowDecl>(Func))
         Func = cast<UsingShadowDecl>(Func)->getTargetDecl();
 
@@ -14048,20 +14071,36 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
         AddOverloadCandidate(cast<CXXConstructorDecl>(Func), I.getPair(), Args,
                              CandidateSet,
                              /*SuppressUserConversions*/ false);
-      } else if ((Method = dyn_cast<CXXMethodDecl>(Func))) {
+      } else if ((FuncDecl = dyn_cast<FunctionDecl>(Func))) {
         // If explicit template arguments were provided, we can't call a
         // non-template member function.
         if (TemplateArgs)
           continue;
 
-        AddMethodCandidate(Method, I.getPair(), ActingDC, ObjectType,
-                           ObjectClassification, Args, CandidateSet,
-                           /*SuppressUserConversions=*/false);
+        if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(FuncDecl)) {
+          assert(ActingDC && "MethodDecl, but no class decl context?");
+          AddMethodCandidate(Method, I.getPair(), ActingDC, ObjectType,
+                             ObjectClassification, Args, CandidateSet,
+                             /*SuppressUserConversions=*/false);
+        } else {
+          if (FuncDecl->isUFCSCandidate())
+            AddOverloadCandidate(FuncDecl, I.getPair(), ArgsWithMember,
+                                 CandidateSet,
+                                 /*SuppressUserConversions=*/false);
+        }
       } else {
-        AddMethodTemplateCandidate(
-            cast<FunctionTemplateDecl>(Func), I.getPair(), ActingDC,
-            TemplateArgs, ObjectType, ObjectClassification, Args, CandidateSet,
-            /*SuppressUserConversions=*/false);
+        FunctionTemplateDecl *TemplateDecl = cast<FunctionTemplateDecl>(Func);
+        if (TemplateDecl->getTemplatedDecl()->isUFCSCandidate())
+          AddTemplateOverloadCandidate(TemplateDecl, I.getPair(), TemplateArgs,
+                                       ArgsWithMember, CandidateSet);
+        else {
+          assert(ActingDC && "Template decl is not a UFCS candidate, and is "
+                             "not defined in a class decl context.");
+          AddMethodTemplateCandidate(TemplateDecl, I.getPair(), ActingDC,
+                                     TemplateArgs, ObjectType,
+                                     ObjectClassification, Args, CandidateSet,
+                                     /*SuppressUserConversions=*/false);
+        }
       }
     }
 
@@ -14073,7 +14112,7 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
     switch (CandidateSet.BestViableFunction(*this, UnresExpr->getBeginLoc(),
                                             Best)) {
     case OR_Success:
-      Method = cast<CXXMethodDecl>(Best->Function);
+      FuncDecl = cast<FunctionDecl>(Best->Function);
       FoundDecl = Best->FoundDecl;
       CheckUnresolvedMemberAccess(UnresExpr, Best->FoundDecl);
       if (DiagnoseUseOfDecl(Best->FoundDecl, UnresExpr->getNameLoc()))
@@ -14084,8 +14123,8 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
       // FIXME: This would be more comprehensively addressed by modifying
       // DiagnoseUseOfDecl to accept both the FoundDecl and the decl
       // being used.
-      if (Method != FoundDecl.getDecl() &&
-                      DiagnoseUseOfDecl(Method, UnresExpr->getNameLoc()))
+      if (FuncDecl != FoundDecl.getDecl() &&
+          DiagnoseUseOfDecl(FuncDecl, UnresExpr->getNameLoc()))
         return ExprError();
       break;
 
@@ -14118,53 +14157,68 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
       return ExprError();
     }
 
-    MemExprE = FixOverloadedFunctionReference(MemExprE, FoundDecl, Method);
+    MemExprE = FixOverloadedFunctionReference(MemExprE, FoundDecl, FuncDecl);
 
     // If overload resolution picked a static member, build a
     // non-member call based on that function.
-    if (Method->isStatic()) {
-      return BuildResolvedCallExpr(MemExprE, Method, LParenLoc, Args,
-                                   RParenLoc);
+    if (auto MethodDecl = dyn_cast<CXXMethodDecl>(FuncDecl)) {
+      if (MethodDecl->isStatic())
+        return BuildResolvedCallExpr(MemExprE, FuncDecl, LParenLoc, Args,
+                                     RParenLoc);
     }
 
     MemExpr = cast<MemberExpr>(MemExprE->IgnoreParens());
   }
 
-  QualType ResultType = Method->getReturnType();
+  QualType ResultType = FuncDecl->getReturnType();
   ExprValueKind VK = Expr::getValueKindForType(ResultType);
   ResultType = ResultType.getNonLValueExprType(Context);
 
-  assert(Method && "Member call to something that isn't a method?");
-  const auto *Proto = Method->getType()->castAs<FunctionProtoType>();
-  CXXMemberCallExpr *TheCall = CXXMemberCallExpr::Create(
-      Context, MemExprE, Args, ResultType, VK, RParenLoc,
-      CurFPFeatureOverrides(), Proto->getNumParams());
+  assert(FuncDecl && "Member call to something that isn't a method?");
+  const auto *Proto = FuncDecl->getType()->castAs<FunctionProtoType>();
 
-  // Check for a valid return type.
-  if (CheckCallReturnType(Method->getReturnType(), MemExpr->getMemberLoc(),
-                          TheCall, Method))
-    return ExprError();
+  if (!isa<CXXMethodDecl>(FuncDecl))
+  {
+    assert(FuncDecl->isUFCSCandidate() &&
+           "Candidate decl was not a method or UFCS candidate?");
+
+    Expr *Fn = BuildDeclRefExpr(FuncDecl, FuncDecl->getType(), VK_LValue,
+                                SourceLocation());
+    return BuildResolvedCallExpr(Fn, FuncDecl, LParenLoc, ArgsWithMember,
+                                 RParenLoc, nullptr, false,
+                                 ADLCallKind::NotADL);
+  }
 
   // Convert the object argument (for a non-static member function call).
   // We only need to do this if there was actually an overload; otherwise
   // it was done at lookup.
-  if (!Method->isStatic()) {
-    ExprResult ObjectArg =
-      PerformObjectArgumentInitialization(MemExpr->getBase(), Qualifier,
-                                          FoundDecl, Method);
+  CXXMethodDecl *MD = cast<CXXMethodDecl>(FuncDecl);
+  CallExpr *TheCall =
+      CXXMemberCallExpr::Create(Context, MemExprE, Args, ResultType, VK,
+                                RParenLoc, CurFPFeatureOverrides(),
+                                Proto->getNumParams());
+
+  if (!MD->isStatic()) {
+    ExprResult ObjectArg = PerformObjectArgumentInitialization(
+        MemExpr->getBase(), Qualifier, FoundDecl, MD);
     if (ObjectArg.isInvalid())
       return ExprError();
     MemExpr->setBase(ObjectArg.get());
   }
 
+  // Check for a valid return type.
+  if (CheckCallReturnType(FuncDecl->getReturnType(), MemExpr->getMemberLoc(),
+                          TheCall, FuncDecl))
+    return ExprError();
+
   // Convert the rest of the arguments
-  if (ConvertArgumentsForCall(TheCall, MemExpr, Method, Proto, Args,
+  if (ConvertArgumentsForCall(TheCall, MemExpr, FuncDecl, Proto, Args,
                               RParenLoc))
     return ExprError();
 
-  DiagnoseSentinelCalls(Method, LParenLoc, Args);
+  DiagnoseSentinelCalls(FuncDecl, LParenLoc, Args);
 
-  if (CheckFunctionCall(Method, TheCall, Proto))
+  if (CheckFunctionCall(FuncDecl, TheCall, Proto))
     return ExprError();
 
   // In the case the method to call was not selected by the overloading
@@ -14172,11 +14226,11 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
   // that here, so it will not hide previous -- and more relevant -- errors.
   if (auto *MemE = dyn_cast<MemberExpr>(NakedMemExpr)) {
     if (const EnableIfAttr *Attr =
-            CheckEnableIf(Method, LParenLoc, Args, true)) {
+            CheckEnableIf(FuncDecl, LParenLoc, Args, true)) {
       Diag(MemE->getMemberLoc(),
            diag::err_ovl_no_viable_member_function_in_call)
-          << Method << Method->getSourceRange();
-      Diag(Method->getLocation(),
+          << FuncDecl << FuncDecl->getSourceRange();
+      Diag(FuncDecl->getLocation(),
            diag::note_ovl_candidate_disabled_by_function_cond_attr)
           << Attr->getCond()->getSourceRange() << Attr->getMessage();
       return ExprError();
@@ -14184,9 +14238,7 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
   }
 
   if ((isa<CXXConstructorDecl>(CurContext) ||
-       isa<CXXDestructorDecl>(CurContext)) &&
-      TheCall->getMethodDecl()->isPure()) {
-    const CXXMethodDecl *MD = TheCall->getMethodDecl();
+       isa<CXXDestructorDecl>(CurContext)) && MD->isPure()) {
 
     if (isa<CXXThisExpr>(MemExpr->getBase()->IgnoreParenCasts()) &&
         MemExpr->performsVirtualDispatch(getLangOpts())) {
@@ -14202,8 +14254,7 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
     }
   }
 
-  if (CXXDestructorDecl *DD =
-          dyn_cast<CXXDestructorDecl>(TheCall->getMethodDecl())) {
+  if (CXXDestructorDecl *DD = dyn_cast<CXXDestructorDecl>(FuncDecl)) {
     // a->A::f() doesn't go through the vtable, except in AppleKext mode.
     bool CallCanBeVirtual = !MemExpr->hasQualifier() || getLangOpts().AppleKext;
     CheckVirtualDtorCall(DD, MemExpr->getBeginLoc(), /*IsDelete=*/false,
@@ -14211,8 +14262,7 @@ Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
                          MemExpr->getMemberLoc());
   }
 
-  return CheckForImmediateInvocation(MaybeBindToTemporary(TheCall),
-                                     TheCall->getMethodDecl());
+  return CheckForImmediateInvocation(MaybeBindToTemporary(TheCall), FuncDecl);
 }
 
 /// BuildCallToObjectOfClassType - Build a call to an object of class
@@ -14252,7 +14302,7 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
 
   const auto *Record = Object.get()->getType()->castAs<RecordType>();
   LookupResult R(*this, OpName, LParenLoc, LookupOrdinaryName);
-  LookupQualifiedName(R, Record->getDecl());
+  LookupQualifiedName(R, Record->getDecl(), nullptr);
   R.suppressDiagnostics();
 
   for (LookupResult::iterator Oper = R.begin(), OperEnd = R.end();
@@ -14525,7 +14575,7 @@ Sema::BuildOverloadedArrowExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
     return ExprError();
 
   LookupResult R(*this, OpName, OpLoc, LookupOrdinaryName);
-  LookupQualifiedName(R, Base->getType()->castAs<RecordType>()->getDecl());
+  LookupQualifiedName(R, Base->getType()->castAs<RecordType>()->getDecl(), S);
   R.suppressDiagnostics();
 
   for (LookupResult::iterator Oper = R.begin(), OperEnd = R.end();
@@ -14914,7 +14964,11 @@ Expr *Sema::FixOverloadedFunctionReference(Expr *E, DeclAccessPair Found,
 
     ExprValueKind valueKind;
     QualType type;
-    if (cast<CXXMethodDecl>(Fn)->isStatic()) {
+    if (Fn->isUFCSCandidate()) {
+      assert(Fn->isUFCSCandidate() && "FunctionDecl not UFCS candidate?");
+      valueKind = VK_RValue;
+      type = Context.BoundMemberTy;
+    } else if (cast<CXXMethodDecl>(Fn)->isStatic()) {
       valueKind = VK_LValue;
       type = Fn->getType();
     } else {

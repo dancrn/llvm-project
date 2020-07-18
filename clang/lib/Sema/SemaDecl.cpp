@@ -8427,10 +8427,11 @@ static FunctionDecl *CreateNewFunctionDecl(Sema &SemaRef, Declarator &D,
       (D.isFunctionDeclarator() && D.getFunctionTypeInfo().hasPrototype) ||
       (!R->getAsAdjusted<FunctionType>() && R->isFunctionProtoType());
 
-    NewFD = FunctionDecl::Create(SemaRef.Context, DC, D.getBeginLoc(), NameInfo,
-                                 R, TInfo, SC, isInline, HasPrototype,
-                                 CSK_unspecified,
-                                 /*TrailingRequiresClause=*/nullptr);
+    NewFD =
+        FunctionDecl::Create(SemaRef.Context, DC, D.getBeginLoc(), NameInfo, R,
+                             TInfo, SC, isInline, HasPrototype, CSK_unspecified,
+                             /*TrailingRequiresClause=*/nullptr,
+                             /*IsUFCSCandidate*/ false);
     if (D.isInvalidType())
       NewFD->setInvalidDecl();
 
@@ -8560,7 +8561,8 @@ static FunctionDecl *CreateNewFunctionDecl(Sema &SemaRef, Declarator &D,
     //   - we're in C++ (where every function has a prototype),
     return FunctionDecl::Create(SemaRef.Context, DC, D.getBeginLoc(), NameInfo,
                                 R, TInfo, SC, isInline, true /*HasPrototype*/,
-                                ConstexprKind, TrailingRequiresClause);
+                                ConstexprKind, TrailingRequiresClause,
+                                /*IsUFCSCandidate*/ false);
   }
 }
 
@@ -9251,6 +9253,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   unsigned FTIIdx;
   if (D.isFunctionDeclarator(FTIIdx)) {
     DeclaratorChunk::FunctionTypeInfo &FTI = D.getTypeObject(FTIIdx).Fun;
+    NewFD->setUFCSCandidate(FTI.IsUFCSCandidate);
 
     // Check for C99 6.7.5.3p10 - foo(void) is a non-varargs
     // function that takes no arguments, not a function that takes a

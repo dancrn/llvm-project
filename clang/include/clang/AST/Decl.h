@@ -1970,20 +1970,20 @@ public:
          TypeSourceInfo *TInfo, StorageClass SC, bool isInlineSpecified = false,
          bool hasWrittenPrototype = true,
          ConstexprSpecKind ConstexprKind = CSK_unspecified,
-         Expr *TrailingRequiresClause = nullptr) {
+         Expr *TrailingRequiresClause = nullptr, bool IsUFCSCandidate = false) {
     DeclarationNameInfo NameInfo(N, NLoc);
     return FunctionDecl::Create(C, DC, StartLoc, NameInfo, T, TInfo, SC,
                                 isInlineSpecified, hasWrittenPrototype,
-                                ConstexprKind, TrailingRequiresClause);
+                                ConstexprKind, TrailingRequiresClause,
+                                IsUFCSCandidate);
   }
 
-  static FunctionDecl *Create(ASTContext &C, DeclContext *DC,
-                              SourceLocation StartLoc,
-                              const DeclarationNameInfo &NameInfo, QualType T,
-                              TypeSourceInfo *TInfo, StorageClass SC,
-                              bool isInlineSpecified, bool hasWrittenPrototype,
-                              ConstexprSpecKind ConstexprKind,
-                              Expr *TrailingRequiresClause);
+  static FunctionDecl *
+  Create(ASTContext &C, DeclContext *DC, SourceLocation StartLoc,
+         const DeclarationNameInfo &NameInfo, QualType T, TypeSourceInfo *TInfo,
+         StorageClass SC, bool isInlineSpecified, bool hasWrittenPrototype,
+         ConstexprSpecKind ConstexprKind, Expr *TrailingRequiresClause,
+         bool IsUFCSCandidate);
 
   static FunctionDecl *CreateDeserialized(ASTContext &C, unsigned ID);
 
@@ -2276,6 +2276,12 @@ public:
   }
 
   void setDeletedAsWritten(bool D = true) { FunctionDeclBits.IsDeleted = D; }
+
+  bool isUFCSCandidate() const { return FunctionDeclBits.IsUFCSCandidate; }
+
+  void setUFCSCandidate(bool value) {
+    FunctionDeclBits.IsUFCSCandidate = value;
+  }
 
   /// Determines whether this function is "main", which is the
   /// entry point into an executable program.

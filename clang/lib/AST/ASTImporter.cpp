@@ -3375,7 +3375,7 @@ ExpectedDecl ASTNodeImporter::VisitFunctionDecl(FunctionDecl *D) {
             ToFunction, D, Importer.getToContext(), DC, ToInnerLocStart,
             NameInfo, T, TInfo, D->getStorageClass(), D->isInlineSpecified(),
             D->hasWrittenPrototype(), D->getConstexprKind(),
-            TrailingRequiresClause))
+            TrailingRequiresClause, D->isUFCSCandidate()))
       return ToFunction;
   }
 

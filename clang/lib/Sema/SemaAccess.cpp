@@ -1545,8 +1545,21 @@ Sema::AccessResult Sema::CheckUnresolvedLookupAccess(UnresolvedLookupExpr *E,
 /// access which has now been resolved to a member.
 Sema::AccessResult Sema::CheckUnresolvedMemberAccess(UnresolvedMemberExpr *E,
                                                      DeclAccessPair Found) {
-  if (!getLangOpts().AccessControl ||
-      Found.getAccess() == AS_public)
+  // When in a UFCS context, FunctionDecls that are not class methods can fall
+  // through here. In those cases, there is no access control to do.
+  if (!isa<CXXMethodDecl>(Found.getDecl()) &&
+      isa<FunctionDecl>(Found.getDecl()))
+    return AR_accessible;
+
+  // For the same reason as above, FunctionTemplateDecls can also get here.
+  // However, in those cases, we need to check to see if the decl context for
+  // that template was a class/struct context. If it is, then we do access
+  // control as usual.
+  if (isa<FunctionTemplateDecl>(Found.getDecl()) &&
+      !isa<CXXRecordDecl>(Found.getDecl()->getDeclContext()))
+    return AR_accessible;
+
+  if (!getLangOpts().AccessControl || Found.getAccess() == AS_public)
     return AR_accessible;
 
   QualType BaseType = E->getBaseType();
@@ -1864,13 +1877,21 @@ void Sema::CheckLookupAccess(const LookupResult &R) {
   assert(R.getNamingClass() && "performing access check without naming class");
 
   for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I) {
-    if (I.getAccess() != AS_public) {
-      AccessTarget Entity(Context, AccessedEntity::Member,
-                          R.getNamingClass(), I.getPair(),
-                          R.getBaseObjectType());
-      Entity.setDiag(diag::err_access);
-      CheckAccess(*this, R.getNameLoc(), Entity);
-    }
+    NamedDecl *Item = I.getDecl();
+
+    // If we have a function decl that isn't a method decl, then it must be a
+    // UFCS candidate, which has no access control
+    if (!isa<CXXMethodDecl>(Item) && isa<FunctionDecl>(Item))
+      continue;
+
+    // Otherwise, check that we have access to the field
+    if (I.getAccess() == AS_public)
+      continue;
+
+    AccessTarget Entity(Context, AccessedEntity::Member, R.getNamingClass(),
+                        I.getPair(), R.getBaseObjectType());
+    Entity.setDiag(diag::err_access);
+    CheckAccess(*this, R.getNameLoc(), Entity);
   }
 }
 

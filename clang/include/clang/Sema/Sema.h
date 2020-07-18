@@ -3749,7 +3749,7 @@ public:
       TypoRecoveryCallback;
 
 private:
-  bool CppLookupName(LookupResult &R, Scope *S);
+  bool CppLookupName(LookupResult &R, const Scope *S);
 
   struct TypoExprState {
     std::unique_ptr<TypoCorrectionConsumer> Consumer;
@@ -3807,12 +3807,13 @@ public:
                               RedeclarationKind Redecl
                                 = NotForRedeclaration);
   bool LookupBuiltin(LookupResult &R);
-  bool LookupName(LookupResult &R, Scope *S,
+  bool LookupName(LookupResult &R, const Scope *S,
                   bool AllowBuiltinCreation = false);
   bool LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
+                           const Scope *UFCSScope = nullptr,
                            bool InUnqualifiedLookup = false);
   bool LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
-                           CXXScopeSpec &SS);
+                           const Scope *UFCSScope, CXXScopeSpec &SS);
   bool LookupParsedName(LookupResult &R, Scope *S, CXXScopeSpec *SS,
                         bool AllowBuiltinCreation = false,
                         bool EnteringContext = false);

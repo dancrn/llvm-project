@@ -1908,8 +1908,8 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
     Function = FunctionDecl::Create(
         SemaRef.Context, DC, D->getInnerLocStart(), NameInfo, T, TInfo,
         D->getCanonicalDecl()->getStorageClass(), D->isInlineSpecified(),
-        D->hasWrittenPrototype(), D->getConstexprKind(),
-        TrailingRequiresClause);
+        D->hasWrittenPrototype(), D->getConstexprKind(), TrailingRequiresClause,
+        D->isUFCSCandidate());
     Function->setRangeEnd(D->getSourceRange().getEnd());
     Function->setUsesFPIntrin(D->usesFPIntrin());
   }
@@ -4972,7 +4972,7 @@ void Sema::BuildVariableInstantiation(
       Previous.addDecl(NewPrev);
   } else if (!isa<VarTemplateSpecializationDecl>(NewVar) &&
              OldVar->hasLinkage()) {
-    LookupQualifiedName(Previous, NewVar->getDeclContext(), false);
+    LookupQualifiedName(Previous, NewVar->getDeclContext(), nullptr, false);
   } else if (PrevDeclForVarTemplateSpecialization) {
     Previous.addDecl(PrevDeclForVarTemplateSpecialization);
   }

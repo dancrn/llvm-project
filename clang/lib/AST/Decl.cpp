@@ -2799,6 +2799,7 @@ FunctionDecl::FunctionDecl(Kind DK, ASTContext &C, DeclContext *DC,
   FunctionDeclBits.IsMultiVersion = false;
   FunctionDeclBits.IsCopyDeductionCandidate = false;
   FunctionDeclBits.HasODRHash = false;
+  FunctionDeclBits.IsUFCSCandidate = false;
   if (TrailingRequiresClause)
     setTrailingRequiresClause(TrailingRequiresClause);
 }
@@ -4738,12 +4739,14 @@ FunctionDecl *FunctionDecl::Create(ASTContext &C, DeclContext *DC,
                                    StorageClass SC, bool isInlineSpecified,
                                    bool hasWrittenPrototype,
                                    ConstexprSpecKind ConstexprKind,
-                                   Expr *TrailingRequiresClause) {
+                                   Expr *TrailingRequiresClause,
+                                   bool IsUFCSCandidate) {
   FunctionDecl *New =
       new (C, DC) FunctionDecl(Function, C, DC, StartLoc, NameInfo, T, TInfo,
                                SC, isInlineSpecified, ConstexprKind,
                                TrailingRequiresClause);
   New->setHasWrittenPrototype(hasWrittenPrototype);
+  New->setUFCSCandidate(IsUFCSCandidate);
   return New;
 }
 

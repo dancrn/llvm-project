@@ -1842,8 +1842,10 @@ bool Parser::isCXXFunctionDeclarator(bool *IsAmbiguous) {
       const Token &Next = NextToken();
       if (Next.isOneOf(tok::amp, tok::ampamp, tok::kw_const, tok::kw_volatile,
                        tok::kw_throw, tok::kw_noexcept, tok::l_square,
-                       tok::l_brace, tok::kw_try, tok::equal, tok::arrow) ||
+                       tok::l_brace, tok::kw_try, tok::equal, tok::arrow,
+                       tok::kw_this) ||
           isCXX11VirtSpecifier(Next))
+
         // The next token cannot appear after a constructor-style initializer,
         // and can appear next in a function definition. This must be a function
         // declarator.
@@ -1884,6 +1886,11 @@ Parser::TryParseParameterDeclarationClause(bool *InvalidAsDeclaration,
 
   if (Tok.is(tok::r_paren))
     return TPResult::Ambiguous;
+
+  // if we have a this keyword, it might be a UFCS func, but i think we need
+  // to continue analysis to be sure.
+  if (Tok.is(tok::kw_this))
+    ConsumeToken();
 
   //   parameter-declaration-list[opt] '...'[opt]
   //   parameter-declaration-list ',' '...'

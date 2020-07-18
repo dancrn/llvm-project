@@ -1173,7 +1173,7 @@ struct DeclaratorChunk {
 
   /// Loc - The place where this type was defined.
   SourceLocation Loc;
-  /// EndLoc - If valid, the place where this chunck ends.
+  /// EndLoc - If valid, the place where this chunk ends.
   SourceLocation EndLoc;
 
   SourceRange getSourceRange() const {
@@ -1294,6 +1294,11 @@ struct DeclaratorChunk {
     /// HasTrailingReturnType - If this is true, a trailing return type was
     /// specified.
     unsigned HasTrailingReturnType : 1;
+
+    /// IsUFCSCandidate - When set to true, indicates that this function is
+    /// a candidate extension method for a type convertible to first parameter
+    /// arg type.
+    unsigned IsUFCSCandidate : 1;
 
     /// The location of the left parenthesis in the source.
     unsigned LParenLoc;
@@ -1633,7 +1638,8 @@ struct DeclaratorChunk {
                                      Declarator &TheDeclarator,
                                      TypeResult TrailingReturnType =
                                                     TypeResult(),
-                                     DeclSpec *MethodQualifiers = nullptr);
+                                     DeclSpec *MethodQualifiers = nullptr,
+                                     bool IsUFCSCand = false);
 
   /// Return a DeclaratorChunk for a block.
   static DeclaratorChunk getBlockPointer(unsigned TypeQuals,
