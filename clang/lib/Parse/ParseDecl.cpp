@@ -2922,10 +2922,12 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
   bool EnteringContext = (DSContext == DeclSpecContext::DSC_class ||
                           DSContext == DeclSpecContext::DSC_top_level);
   bool AttrsLastTime = false;
+  int NumDeclSpec = 0;
   ParsedAttributesWithRange attrs(AttrFactory);
   // We use Sema's policy to get bool macros right.
   PrintingPolicy Policy = Actions.getPrintingPolicy();
   while (1) {
+    NumDeclSpec += 1;
     bool isInvalid = false;
     bool isStorageClass = false;
     const char *PrevSpec = nullptr;
@@ -2967,6 +2969,24 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
       // specifiers.  First verify that DeclSpec's are consistent.
       DS.Finish(Actions, Policy);
       return;
+
+    case tok::kw_this:
+      // Note that we don't expect to reach this code unless there's an error:
+      // 'this' is consumed by ParseFunctionDeclarator. This is included only to
+      // provide more useful information in the diagnostic.
+      if (!getLangOpts().UnifiedFunctionCallSyntax)
+        goto DoneWithDeclSpec;
+
+      // If we've had more than one decl spec, we may still be on the first
+      // param's decl spec, so we diagnose the ordering of the declspec as the
+      // issue.
+      if (1 < NumDeclSpec)
+        Diag(Tok, diag::err_this_qualifier_invalid_location);
+      else
+        Diag(Tok, diag::err_this_qualifier_invalid_parameter);
+
+      ConsumeToken();
+      continue;
 
     case tok::l_square:
     case tok::kw_alignas:
@@ -6371,6 +6391,7 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
      They differ for trailing return types. */
   SourceLocation StartLoc, LocalEndLoc, EndLoc;
   SourceLocation LParenLoc, RParenLoc;
+  SourceLocation ThisLoc;
   LParenLoc = Tracker.getOpenLocation();
   StartLoc = LParenLoc;
 
@@ -6390,6 +6411,16 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
     MaybeParseCXX11Attributes(FnAttrs);
     ProhibitAttributes(FnAttrs);
   } else {
+    if (getLangOpts().UnifiedFunctionCallSyntax && Tok.is(tok::kw_this)) {
+      if (ParamInfo.size())
+        Diag(Tok, diag::err_this_qualifier_invalid_parameter);
+
+      if (D.getContext() != DeclaratorContext::FileContext)
+        Diag(Tok, diag::err_this_qualifier_invalid_context);
+
+      ThisLoc = ConsumeToken();
+    }
+
     if (Tok.isNot(tok::r_paren))
       ParseParameterDeclarationClause(D.getContext(), FirstArgAttrs, ParamInfo,
                                       EllipsisLoc);
@@ -6498,12 +6529,13 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
                     HasProto, IsAmbiguous, LParenLoc, ParamInfo.data(),
                     ParamInfo.size(), EllipsisLoc, RParenLoc,
                     RefQualifierIsLValueRef, RefQualifierLoc,
-                    /*MutableLoc=*/SourceLocation(),
-                    ESpecType, ESpecRange, DynamicExceptions.data(),
-                    DynamicExceptionRanges.data(), DynamicExceptions.size(),
+                    /*MutableLoc=*/SourceLocation(), ESpecType, ESpecRange,
+                    DynamicExceptions.data(), DynamicExceptionRanges.data(),
+                    DynamicExceptions.size(),
                     NoexceptExpr.isUsable() ? NoexceptExpr.get() : nullptr,
                     ExceptionSpecTokens, DeclsInPrototype, StartLoc,
-                    LocalEndLoc, D, TrailingReturnType, &DS),
+                    LocalEndLoc, D, TrailingReturnType, &DS,
+                    /*IsUFCSCand*/ ThisLoc.isValid()),
                 std::move(FnAttrs), EndLoc);
 }
 

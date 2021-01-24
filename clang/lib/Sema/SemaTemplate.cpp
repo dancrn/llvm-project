@@ -10409,7 +10409,7 @@ Sema::CheckTypenameType(ElaboratedTypeKeyword Keyword,
   DeclarationName Name(&II);
   LookupResult Result(*this, Name, IILoc, LookupOrdinaryName);
   if (Ctx)
-    LookupQualifiedName(Result, Ctx, SS);
+    LookupQualifiedName(Result, Ctx, nullptr, SS);
   else
     LookupName(Result, CurScope);
   unsigned DiagID = 0;

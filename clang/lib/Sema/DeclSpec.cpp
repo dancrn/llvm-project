@@ -157,31 +157,18 @@ CXXScopeSpec::getWithLocInContext(ASTContext &Context) const {
 
 /// DeclaratorChunk::getFunction - Return a DeclaratorChunk for a function.
 /// "TheDeclarator" is the declarator that this will be added to.
-DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
-                                             bool isAmbiguous,
-                                             SourceLocation LParenLoc,
-                                             ParamInfo *Params,
-                                             unsigned NumParams,
-                                             SourceLocation EllipsisLoc,
-                                             SourceLocation RParenLoc,
-                                             bool RefQualifierIsLvalueRef,
-                                             SourceLocation RefQualifierLoc,
-                                             SourceLocation MutableLoc,
-                                             ExceptionSpecificationType
-                                                 ESpecType,
-                                             SourceRange ESpecRange,
-                                             ParsedType *Exceptions,
-                                             SourceRange *ExceptionRanges,
-                                             unsigned NumExceptions,
-                                             Expr *NoexceptExpr,
-                                             CachedTokens *ExceptionSpecTokens,
-                                             ArrayRef<NamedDecl*>
-                                                 DeclsInPrototype,
-                                             SourceLocation LocalRangeBegin,
-                                             SourceLocation LocalRangeEnd,
-                                             Declarator &TheDeclarator,
-                                             TypeResult TrailingReturnType,
-                                             DeclSpec *MethodQualifiers) {
+DeclaratorChunk DeclaratorChunk::getFunction(
+    bool hasProto, bool isAmbiguous, SourceLocation LParenLoc,
+    ParamInfo *Params, unsigned NumParams, SourceLocation EllipsisLoc,
+    SourceLocation RParenLoc, bool RefQualifierIsLvalueRef,
+    SourceLocation RefQualifierLoc, SourceLocation MutableLoc,
+    ExceptionSpecificationType ESpecType, SourceRange ESpecRange,
+    ParsedType *Exceptions, SourceRange *ExceptionRanges,
+    unsigned NumExceptions, Expr *NoexceptExpr,
+    CachedTokens *ExceptionSpecTokens, ArrayRef<NamedDecl *> DeclsInPrototype,
+    SourceLocation LocalRangeBegin, SourceLocation LocalRangeEnd,
+    Declarator &TheDeclarator, TypeResult TrailingReturnType,
+    DeclSpec *MethodQualifiers, bool IsUFCSCand) {
   assert(!(MethodQualifiers && MethodQualifiers->getTypeQualifiers() & DeclSpec::TQ_atomic) &&
          "function cannot have _Atomic qualifier");
 
@@ -212,6 +199,7 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
   I.Fun.TrailingReturnType      = TrailingReturnType.get();
   I.Fun.MethodQualifiers        = nullptr;
   I.Fun.QualAttrFactory         = nullptr;
+  I.Fun.IsUFCSCandidate         = IsUFCSCand;
 
   if (MethodQualifiers && (MethodQualifiers->getTypeQualifiers() ||
                            MethodQualifiers->getAttributes().size())) {

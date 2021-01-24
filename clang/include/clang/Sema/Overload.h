@@ -791,6 +791,10 @@ class Sema;
     /// function pointer or reference (C++ [over.call.object]).
     FunctionDecl *Function;
 
+    /// The first argument in a UFCS candidate call, i.e., for a call of the
+    /// form 'x.f()', this will be 'x'.
+    Expr *UFCSArgument;
+
     /// FoundDecl - The original declaration that was looked up /
     /// invented / otherwise found, together with its access.
     /// Might be a UsingShadowDecl or a FunctionTemplateDecl.

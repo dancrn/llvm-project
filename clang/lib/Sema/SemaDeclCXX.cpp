@@ -13629,7 +13629,7 @@ buildSingleCopyAssignRecursively(Sema &S, SourceLocation Loc, QualType T,
     DeclarationName Name
       = S.Context.DeclarationNames.getCXXOperatorName(OO_Equal);
     LookupResult OpLookup(S, Name, Loc, Sema::LookupOrdinaryName);
-    S.LookupQualifiedName(OpLookup, ClassDecl, false);
+    S.LookupQualifiedName(OpLookup, ClassDecl, nullptr, false);
 
     // Prior to C++11, filter out any result that isn't a copy/move-assignment
     // operator.

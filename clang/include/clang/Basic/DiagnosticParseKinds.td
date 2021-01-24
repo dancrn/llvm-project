@@ -123,6 +123,12 @@ def warn_cxx98_compat_scoped_enum : Warning<
 def err_anonymous_enum_bitfield : Error<
   "ISO C++ only allows ':' in member enumeration declaration to introduce "
   "a fixed underlying type, not an anonymous bit-field">;
+def err_this_qualifier_invalid_location: Error<
+  "'this' qualifier must precede declaration specifiers">;
+def err_this_qualifier_invalid_parameter: Error<
+  "'this' qualifier must qualify the first function parameter">;
+def err_this_qualifier_invalid_context: Error<
+  "Unified call syntax only applies to regular functions">;
 
 def warn_cxx98_compat_alignof : Warning<
   "alignof expressions are incompatible with C++98">,
